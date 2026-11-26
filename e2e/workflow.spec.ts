@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 const SELECTED_CLASS_REGEX = /selected/;
+const WORKFLOW_ROUTE_REGEX = /\/workflows\/[^/]+$/;
 
 test.describe("Workflow Editor", () => {
   test.beforeEach(async ({ page }) => {
@@ -21,6 +22,23 @@ test.describe("Workflow Editor", () => {
     // Verify React Flow is rendered
     const reactFlow = page.locator(".react-flow");
     await expect(reactFlow).toBeVisible();
+  });
+
+  test("can undo and redo workflow edits with keyboard shortcuts", async ({
+    page,
+  }) => {
+    await page.getByRole("button", { name: "Add a Step" }).click();
+    await expect(page).toHaveURL(WORKFLOW_ROUTE_REGEX);
+
+    const actionNode = page.locator(".react-flow__node-action");
+    await expect(actionNode).toBeVisible();
+    await page.getByRole("button", { name: "Fit view" }).click();
+
+    await page.keyboard.press("Control+z");
+    await expect(actionNode).toHaveCount(0);
+
+    await page.keyboard.press("Control+y");
+    await expect(actionNode).toHaveCount(1);
   });
 
   test("can create a new step by dragging from a node", async ({ page }) => {
