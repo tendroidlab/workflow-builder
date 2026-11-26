@@ -1,8 +1,9 @@
 "use client";
 
-import { Key, LogOut, Moon, Plug, Settings, Sun } from "lucide-react";
+import { Download, Key, LogOut, Moon, Plug, Settings, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   AuthDialog,
   isSingleProviderSignInInitiated,
@@ -49,6 +50,32 @@ export const UserMenu = () => {
     await signOut();
   };
 
+  const handleExportAccountData = async () => {
+    try {
+      const response = await fetch("/api/user/export");
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || "Failed to export account data");
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = `workflow-builder-data-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+      toast.success("Your data export is ready");
+    } catch (error) {
+      console.error("Failed to export account data:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to export account data"
+      );
+    }
+  };
+
   // OAuth users can't edit their profile
   const isOAuthUser =
     providerId === "vercel" ||
@@ -91,6 +118,16 @@ export const UserMenu = () => {
   if (isAnonymous) {
     return (
       <div className="flex items-center gap-2">
+        {session?.user && (
+          <Button
+            className="h-9"
+            onClick={handleExportAccountData}
+            size="sm"
+            variant="outline"
+          >
+            Export data
+          </Button>
+        )}
         <AuthDialog>
           <Button
             className="h-9 disabled:opacity-100 disabled:[&>*]:text-muted-foreground"
@@ -138,6 +175,10 @@ export const UserMenu = () => {
             <span>Settings</span>
           </DropdownMenuItem>
         )}
+        <DropdownMenuItem onClick={handleExportAccountData}>
+          <Download className="size-4" />
+          <span>Export account data</span>
+        </DropdownMenuItem>
         <DropdownMenuItem onClick={() => openOverlay(IntegrationsOverlay)}>
           <Plug className="size-4" />
           <span>Connections</span>
