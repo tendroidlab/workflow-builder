@@ -17,6 +17,8 @@ import {
 } from "@/lib/integrations-store";
 import type { IntegrationType } from "@/lib/types/integration";
 import {
+  canRedoAtom,
+  canUndoAtom,
   currentWorkflowIdAtom,
   currentWorkflowNameAtom,
   currentWorkflowVisibilityAtom,
@@ -29,9 +31,11 @@ import {
   isSidebarCollapsedAtom,
   isWorkflowOwnerAtom,
   nodesAtom,
+  redoAtom,
   rightPanelWidthAtom,
   selectedExecutionIdAtom,
   triggerExecuteAtom,
+  undoAtom,
   updateNodeDataAtom,
   type WorkflowNode,
   type WorkflowVisibility,
@@ -57,6 +61,20 @@ function getRequiredIntegrationType(
     (action?.integration as IntegrationType | undefined) ||
     SYSTEM_ACTION_INTEGRATIONS[actionType]
   );
+}
+
+function getHistoryAction(event: KeyboardEvent): "undo" | "redo" | null {
+  const key = event.key.toLowerCase();
+  if (!(event.metaKey || event.ctrlKey)) {
+    return null;
+  }
+  if (key === "z") {
+    return event.shiftKey ? "redo" : "undo";
+  }
+  if (event.ctrlKey && !event.metaKey && key === "y") {
+    return "redo";
+  }
+  return null;
 }
 
 // Helper to check and fix a single node's integration
@@ -133,6 +151,10 @@ const WorkflowEditor = ({ params }: WorkflowPageProps) => {
   const setGlobalIntegrations = useSetAtom(integrationsAtom);
   const setIntegrationsLoaded = useSetAtom(integrationsLoadedAtom);
   const integrationsVersion = useAtomValue(integrationsVersionAtom);
+  const canUndo = useAtomValue(canUndoAtom);
+  const canRedo = useAtomValue(canRedoAtom);
+  const undo = useSetAtom(undoAtom);
+  const redo = useSetAtom(redoAtom);
 
   // Panel width state for resizing
   const [panelWidth, setPanelWidth] = useState(30); // default percentage
@@ -519,7 +541,9 @@ const WorkflowEditor = ({ params }: WorkflowPageProps) => {
   // Helper to check if target is an input element
   const isInputElement = useCallback(
     (target: HTMLElement) =>
-      target.tagName === "INPUT" || target.tagName === "TEXTAREA",
+      target.closest(
+        'input, textarea, select, [contenteditable="true"], [role="textbox"]'
+      ) !== null,
     []
   );
 
@@ -562,6 +586,40 @@ const WorkflowEditor = ({ params }: WorkflowPageProps) => {
     [setTriggerExecute, isInputElement, isInMonacoEditor]
   );
 
+  const handleHistoryShortcut = useCallback(
+    (e: KeyboardEvent, target: HTMLElement) => {
+      const action = getHistoryAction(e);
+      if (
+        !(action && isOwner) ||
+        isGenerating ||
+        isInputElement(target) ||
+        isInMonacoEditor(target)
+      ) {
+        return false;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+      if (action === "undo" && canUndo) {
+        undo();
+      }
+      if (action === "redo" && canRedo) {
+        redo();
+      }
+      return true;
+    },
+    [
+      canRedo,
+      canUndo,
+      isGenerating,
+      isInMonacoEditor,
+      isInputElement,
+      isOwner,
+      redo,
+      undo,
+    ]
+  );
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -575,12 +633,17 @@ const WorkflowEditor = ({ params }: WorkflowPageProps) => {
       if (handleRunShortcut(e, target)) {
         return;
       }
+
+      // Handle undo and redo shortcuts
+      if (handleHistoryShortcut(e, target)) {
+        return;
+      }
     };
 
     // Use capture phase only to ensure we can intercept before other handlers
     document.addEventListener("keydown", handleKeyDown, true);
     return () => document.removeEventListener("keydown", handleKeyDown, true);
-  }, [handleSaveShortcut, handleRunShortcut]);
+  }, [handleSaveShortcut, handleRunShortcut, handleHistoryShortcut]);
 
   // Cleanup polling interval on unmount
   useEffect(
