@@ -1,6 +1,6 @@
 "use client";
 
-import { Pencil, Trash2 } from "lucide-react";
+import { CheckCircle2, Pencil, Trash2, XCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -24,6 +24,34 @@ type IntegrationsManagerProps = {
   filter?: string;
 };
 
+type IntegrationTestResult = {
+  status: "success" | "error";
+  message: string;
+};
+
+function IntegrationTestFeedback({
+  result,
+}: {
+  result: IntegrationTestResult;
+}) {
+  const isSuccess = result.status === "success";
+  const StatusIcon = isSuccess ? CheckCircle2 : XCircle;
+
+  return (
+    <output
+      aria-live="polite"
+      className={`flex items-start gap-1.5 pl-6 text-xs ${
+        isSuccess ? "text-primary" : "text-destructive"
+      }`}
+    >
+      <StatusIcon aria-hidden="true" className="mt-0.5 size-3 shrink-0" />
+      <span className="break-words">
+        {isSuccess ? "Connection verified" : "Check failed"}: {result.message}
+      </span>
+    </output>
+  );
+}
+
 export function IntegrationsManager({
   onIntegrationChange,
   filter = "",
@@ -32,6 +60,9 @@ export function IntegrationsManager({
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [loading, setLoading] = useState(true);
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<
+    Record<string, IntegrationTestResult>
+  >({});
 
   const loadIntegrations = useCallback(async () => {
     try {
@@ -49,6 +80,17 @@ export function IntegrationsManager({
   useEffect(() => {
     loadIntegrations();
   }, [loadIntegrations]);
+
+  const clearTestResult = (id: string) => {
+    setTestResults((current) => {
+      if (!current[id]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+  };
 
   // Get integrations with their labels, sorted by label then name
   const integrationsWithLabels = useMemo(() => {
@@ -86,10 +128,12 @@ export function IntegrationsManager({
     push(EditConnectionOverlay, {
       integration,
       onSuccess: () => {
+        clearTestResult(integration.id);
         loadIntegrations();
         onIntegrationChange?.();
       },
       onDelete: () => {
+        clearTestResult(integration.id);
         loadIntegrations();
         onIntegrationChange?.();
       },
@@ -100,6 +144,7 @@ export function IntegrationsManager({
     push(DeleteConnectionOverlay, {
       integration,
       onSuccess: () => {
+        clearTestResult(integration.id);
         loadIntegrations();
         onIntegrationChange?.();
       },
@@ -109,7 +154,14 @@ export function IntegrationsManager({
   const handleTest = async (id: string) => {
     try {
       setTestingId(id);
+      setTestResults((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+
       const result = await api.integration.testConnection(id);
+      setTestResults((current) => ({ ...current, [id]: result }));
 
       if (result.status === "success") {
         toast.success(result.message || "Connection successful");
@@ -118,9 +170,13 @@ export function IntegrationsManager({
       }
     } catch (error) {
       console.error("Connection test failed:", error);
-      toast.error(
-        error instanceof Error ? error.message : "Connection test failed"
-      );
+      const message =
+        error instanceof Error ? error.message : "Connection test failed";
+      setTestResults((current) => ({
+        ...current,
+        [id]: { status: "error", message },
+      }));
+      toast.error(message);
     } finally {
       setTestingId(null);
     }
@@ -159,27 +215,35 @@ export function IntegrationsManager({
       <div className="space-y-1">
         {integrationsWithLabels.map((integration) => (
           <div
-            className="flex items-center justify-between rounded-md px-2 py-1.5"
+            className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5"
             key={integration.id}
           >
-            <div className="flex items-center gap-2">
-              <IntegrationIcon
-                className="size-4"
-                integration={
-                  integration.type === "ai-gateway"
-                    ? "vercel"
-                    : integration.type
-                }
-              />
-              <span className="font-medium text-sm">{integration.label}</span>
-              <span className="text-muted-foreground text-sm">
-                {integration.name}
-              </span>
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <div className="flex min-w-0 items-center gap-2">
+                <IntegrationIcon
+                  className="size-4 shrink-0"
+                  integration={
+                    integration.type === "ai-gateway"
+                      ? "vercel"
+                      : integration.type
+                  }
+                />
+                <span className="shrink-0 font-medium text-sm">
+                  {integration.label}
+                </span>
+                <span className="truncate text-muted-foreground text-sm">
+                  {integration.name}
+                </span>
+              </div>
+              {testResults[integration.id] && (
+                <IntegrationTestFeedback result={testResults[integration.id]} />
+              )}
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex shrink-0 items-center gap-1">
               <Button
+                aria-label={`Test ${integration.name} connection`}
                 className="h-7 px-2"
-                disabled={testingId === integration.id}
+                disabled={testingId !== null}
                 onClick={() => handleTest(integration.id)}
                 size="sm"
                 variant="outline"
@@ -191,6 +255,7 @@ export function IntegrationsManager({
                 )}
               </Button>
               <Button
+                aria-label={`Edit ${integration.name}`}
                 className="size-7"
                 onClick={() => handleEdit(integration)}
                 size="icon"
@@ -199,6 +264,7 @@ export function IntegrationsManager({
                 <Pencil className="size-3" />
               </Button>
               <Button
+                aria-label={`Delete ${integration.name}`}
                 className="size-7"
                 onClick={() => handleDelete(integration)}
                 size="icon"
